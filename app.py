@@ -1,8 +1,11 @@
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
-from datetime import datetime
+import redis
 
 app = Flask(__name__)
+
+#set config do redis
+redis_cache= redis.Redis(host='localhost',port='6379',db=0)
 
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///challenge.db"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
