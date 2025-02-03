@@ -1,31 +1,7 @@
-from functools import wraps
 import string
 import random
-from flask import jsonify, request
 from app import db
 from datetime import datetime
-
-#função midware para validar auth do usuario
-def auth_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        auth_token = request.headers.get('Authorization')
-
-        #passando e pegando user_id por formrequest
-        user_id = request.form.get('user_id')
-
-        if not auth_token:
-            return jsonify({"error": "Autorização necessária"}), 401
-
-        token_session = auth_token.replace("Bearer ", "")
-        session = UserSession.query.filter_by(user_id=user_id, session=token_session,valid=True).first()
-       
-        if not session:
-            return jsonify({"error": "Sessão inválida ou expirada"}), 401
-
-        return f(*args, **kwargs)  # Continua se autenticado
-
-    return decorated_function
 
 #função para gerar token randomido para session  
 def rand_str():
@@ -53,6 +29,10 @@ class UserSession(db.Model):
    session  = db.Column(db.String(50), unique=True, nullable=False, default=rand_str)     
    created_at = db.Column(db.DateTime, default=datetime.utcnow)
    valid = db.Column(db.Boolean)
+
+   def generate_token():
+    characters = string.ascii_letters + string.digits
+    return ''.join(random.choice(characters) for _ in range(40))
 
    def __repr__(self):
       return '<UserSession %r>' % self.id

@@ -1,6 +1,7 @@
 from app import app,redis_cache
-from flask import json, jsonify, redirect, render_template,request
+from flask import flash, json, jsonify, redirect, render_template,request, url_for
 import hashlib
+from auth import auth_required
 from models import *
 
 @app.route("/")
@@ -15,35 +16,47 @@ def loginPage():
 # endpoit para autenticar usuario
 @app.route("/api/v1/login/", methods=['POST'])
 def login():
-    if request.method == 'POST':
 
-        #pega as informações digitadas no formulario
-        username = request.form.get('username')
-        password = request.form.get('password')
+    if request.is_json:
+        data = request.get_json()
+    else:
+        data = {
+            'username': request.form.get('username'),
+            'password': request.form.get('password')
+        }
 
-        #verifica se usuario existe
-        user = User.query.filter_by(username=username).first()
+    if not data or not data.get('username') or not data.get('password'):
+        return jsonify({"error": "Usuario e senha são obrigatórios"}), 400
+        
+    #pega as informações enviadar por json
+    username = data['username']
+    password = data['password']
 
-        if user:
-            hashed_password = hashlib.md5(password.encode()).hexdigest() #criptografa senha do formulario para comparar com senha salva
+    #verifica se usuario existe
+    user = User.query.filter_by(username=username).first()
 
-            if user.password == hashed_password: #compara senha salva com a senha digitada
-                
-                #verifica se existe uma sessão para este usuario
-                session = UserSession.query.filter_by(user_id=user.id).first()
-                if session:
-                    session.active=True
-                    session.session=rand_str()
-                else:
-                    new_session = UserSession(user_id=user.id, valid=True)
-                    db.session.add(new_session)
-                    
+    if user:
+         #criptografa senha do formulario para comparar com senha salva
+        if user.password == hashlib.sha256(password.encode('utf-8')).hexdigest(): #compara senha salva com a senha digitada
+            last_session = UserSession.query.filter_by(user_id=user.id).order_by(UserSession.created_at.desc()).first()
+            if last_session:
+                last_session.valid = False
                 db.session.commit()
-                return jsonify({"message": "Login realizado com sucesso!", "username": user.username})
-            else:
-                return jsonify({"error": "Senha inválidas"}), 401
+            new_session = UserSession(user_id=user.id,session = UserSession.generate_token(), valid=True)
+            db.session.add(new_session)
+            db.session.commit()
+
+            response = jsonify({"message": "Login realizado com sucesso!", "session_token": new_session.session})
+            response.status_code = 200
+            response.headers['Location'] = url_for('home')  
+            return response
         else:
-            return jsonify({"error": "Usuario inválido"}), 401
+            response = jsonify({"message": "Senha invalida"})
+            response.status_code = 401
+            response.headers['Location'] = url_for('login')  
+            return response
+    else:
+        return jsonify({"error": "Usuario inválido"}), 401
 
 
 ############# endpoints categoria #############
@@ -53,14 +66,18 @@ def login():
 @auth_required
 def upsertUser():
 
-    #recebe os parametros via querystring
-    username = request.args.get('username')
-    password = request.args.get('password')
-    fullname = request.args.get('fullname')
-    active = request.args.get('active')
+    #recebe os parametros via json
+    if not request.is_json:
+        return jsonify({"message": "Json não encontrado!"})
+    data = request.get_json()
+    
+    username = data['username']
+    password = data['password']
+    fullname = data['fullname']
+    active = data['active'] if 'active' in data else True
 
     #criptografa a senha
-    hashed_password = hashlib.md5(password.encode()).hexdigest()
+    hashed_password = hashlib.sha256(password.encode('utf-8')).hexdigest()
 
     #busca no banco se existe o usuario
     user = User.query.filter_by(username=username).first()
@@ -74,7 +91,7 @@ def upsertUser():
             new_user = User(username=username, password=hashed_password, fullname=fullname)
             db.session.add(new_user)
         except:
-            return "Erro ao criar usuario!"
+            return jsonify({"message": "Erro ao criar usuario!"})
     
     db.session.commit()
     return jsonify({"message": "Usuario criado/alterado com sucesso!"})
@@ -107,10 +124,14 @@ def upsertCategory():
     #deleta cache da categoria
     redis_cache.delete('category:all')
 
-    #recebe os parametros via querystring
-    name = request.args.get('name')
-    description  = request.args.get('description')
-    order  = request.args.get('order')
+    #recebe os parametros via json
+    if not request.is_json:
+        return jsonify({"message": "Json não encontrado!"})
+    data = request.get_json()
+    
+    name = data['name']
+    description = data['description']
+    order = data['order']
 
     #busca no banco se existe o usuario
     category = Category.query.filter_by(name=name).first()
@@ -130,23 +151,20 @@ def upsertCategory():
 
 
 #endpoint para deletar categoria
-@app.route("/api/v1/category/delete/", methods=['POST'])
+@app.route("/api/v1/category/delete/<int:category_id>", methods=['POST'])
 @auth_required
-def deleteCategory():
+def deleteCategory(category_id):
 
      #deleta cache da categoria
     redis_cache.delete('category:all')
 
-    #busca categoria pelo id do request
-    id_category = request.args.get('id')
-    category = Category.query.filter_by(id=id_category).first()
-    
+    category = Category.query.get(category_id)
     if not category:
          return jsonify({"error": "Categoria não encontrado"}), 404
     try:
         db.session.delete(category)
         db.session.commit()
-        return jsonify({"message": f"Categoria com ID {id_category} deletado com sucesso!"}), 200
+        return jsonify({"message": f"Categoria com ID {category_id} deletado com sucesso!"}), 200
     except Exception as e:
         db.session.rollback()  
         return jsonify({"error": f"Erro ao deletar o categoria: {str(e)}"}), 500
@@ -200,13 +218,17 @@ def upsertProduct():
      #deleta cache do menu
     redis_cache.delete('menu:all')
 
-    #recebe os parametros via querystring
-    name = request.args.get('name')
-    description  = request.args.get('description')
-    order  = request.args.get('order')
-    price  = request.args.get('price')
-    category_id  = request.args.get('category_id')
-
+    #recebe os parametros via json
+    if not request.is_json:
+        return jsonify({"message": "Json não encontrado!"})
+    data = request.get_json()
+    
+    name = data['name']
+    description = data['description']
+    order = data['order']
+    price = data['price']
+    category_id = data['category_id']
+    
     #busca no banco se existe o usuario
     product = Product.query.filter_by(name=name).first()
     
@@ -227,20 +249,18 @@ def upsertProduct():
     return jsonify({"message": "Produto criado/alterado com sucesso!"})
 
 #endpoint para deletar categoria
-@app.route("/api/v1/product/delete/", methods=['POST'])
+@app.route("/api/v1/product/delete/<int:product_id>", methods=['POST'])
 @auth_required
-def deletProduct():
-    id_product = request.args.get('id')
-
-    product = Category.query.filter_by(id=id_product).first()
+def deletProduct(product_id):
+    product = Category.query.get(product_id)
     
     if not product:
-         return jsonify({"error": "Categoria não encontrado"}), 404
+         return jsonify({"error": "Produto não encontrado"}), 404
     
     try:
         db.session.delete(product)
         db.session.commit()
-        return jsonify({"message": f"Produto com ID {id_product} deletado com sucesso!"}), 200
+        return jsonify({"message": f"Produto com ID {product_id} deletado com sucesso!"}), 200
     except Exception as e:
         db.session.rollback()  
         return jsonify({"error": f"Erro ao deletar o produto: {str(e)}"}), 500

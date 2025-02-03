@@ -1,13 +1,18 @@
+import os
+from dotenv import load_dotenv
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 import redis
 
+load_dotenv()
+
 app = Flask(__name__)
+app.secret_key = os.getenv('SECRET_KEY')
 
 #set config do redis
-redis_cache= redis.Redis(host='localhost',port='6379',db=0)
+redis_cache = redis.Redis(host='localhost',port='6379',db=0)
 
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///challenge.db"
+app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv('SQLITE_DB')
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
 
