@@ -1,0 +1,4 @@
+[x] implementar as tabelas user, user_session
+[ ] Implementar um middleware de autenticação que verifica a sessão fornecida no header Authorization da requisição. Em endpoints que requerem autenticação, 
+o usuário e a sessão devem ser válidas, caso contrário deverá ser retornado status 401 na requisição.
+[ ] Endpoint que realiza a autenticação do usuário: POST /api/v1/login/
